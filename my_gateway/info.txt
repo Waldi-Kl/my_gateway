@@ -1,0 +1,255 @@
+/*
+ * main.c
+ *
+ *  Created on: 18 lut 2026
+ *      Author: kleczynskiw
+ */
+//#include <avr/io.h>
+//#include <util/delay.h>
+//#include <stdio.h>
+//#include <string.h>
+//
+//#define F_CPU 16000000UL
+//#define BAUD 115200
+//#define MYUBRR (F_CPU/16/BAUD-1)
+//
+//#define START_BYTE 0x7E
+//#define MAX_PAYLOAD 32
+//#define BUF_SIZE 64
+//
+//// DE/RE piny RS485
+//#define DE1 0
+//#define DE2 1
+//#define DE3 2
+//
+//typedef struct {
+//    uint8_t node_id;
+//    uint8_t child_id;
+//    uint8_t type;
+//    uint8_t cmd;
+//    uint8_t length;
+//    uint8_t data[MAX_PAYLOAD];
+//    uint8_t crc;
+//} packet_t;
+//
+//// Bufory
+//uint8_t buf1[BUF_SIZE]; uint8_t idx1=0;
+//uint8_t buf2[BUF_SIZE]; uint8_t idx2=0;
+//uint8_t buf3[BUF_SIZE]; uint8_t idx3=0;
+//
+//// --- UART Init ---
+//void uart_init(volatile uint8_t *ubrrh, volatile uint8_t *ubrrl,
+//               volatile uint8_t *ucsrb, volatile uint8_t *ucsrc) {
+//    *ubrrh = (MYUBRR >> 8);
+//    *ubrrl = (MYUBRR & 0xFF);
+//    *ucsrb = (1<<RXEN0) | (1<<TXEN0);
+//    *ucsrc = (1<<UCSZ01) | (1<<UCSZ00);
+//}
+//
+//// --- UART Send Byte ---
+//void uart_send(volatile uint8_t *udr, uint8_t data, volatile uint8_t *ucsra) {
+//    while(!(*ucsra & (1<<UDRE0)));
+//    *udr = data;
+//}
+//
+//// --- CRC8 ---
+//uint8_t crc8(uint8_t *data, uint8_t len) {
+//    uint8_t crc=0;
+//    for(uint8_t i=0;i<len;i++) crc ^= data[i];
+//    return crc;
+//}
+//
+//// --- DE/RE kontrola ---
+//void rs485_tx(uint8_t link){ PORTA |= (1<<link); _delay_us(10);}
+//void rs485_rx(uint8_t link){ PORTA &= ~(1<<link); _delay_us(10);}
+//
+//// --- Buforowanie bajtów ---
+//void buffer_byte(uint8_t b, uint8_t link){
+//    switch(link){
+//        case 1: buf1[idx1++]=b; if(idx1>=BUF_SIZE) idx1=0; break;
+//        case 2: buf2[idx2++]=b; if(idx2>=BUF_SIZE) idx2=0; break;
+//        case 3: buf3[idx3++]=b; if(idx3>=BUF_SIZE) idx3=0; break;
+//    }
+//}
+//
+//// --- Wysy³anie pakietu RS485 ---
+//void send_packet(uint8_t link, packet_t *p){
+//    volatile uint8_t *udr=NULL; volatile uint8_t *ucsra=NULL;
+//    if(link==1){udr=&UDR1; ucsra=&UCSR1A;}
+//    else if(link==2){udr=&UDR2; ucsra=&UCSR2A;}
+//    else if(link==3){udr=&UDR3; ucsra=&UCSR3A;}
+//
+//    rs485_tx(link);
+//    uart_send(udr, START_BYTE, ucsra);
+//    uart_send(udr, p->node_id, ucsra);
+//    uart_send(udr, p->child_id, ucsra);
+//    uart_send(udr, p->type, ucsra);
+//    uart_send(udr, p->cmd, ucsra);
+//    uart_send(udr, p->length, ucsra);
+//    for(uint8_t i=0;i<p->length;i++) uart_send(udr,p->data[i],ucsra);
+//    uart_send(udr, crc8(&p->node_id,5+p->length),ucsra);
+//    rs485_rx(link);
+//}
+//
+//// --- Procesowanie pakietu przychodz¹cego i wysy³ka JSON do HA ---
+//void process_packet(uint8_t *buf, uint8_t len){
+//    if(len<6 || buf[0]!=START_BYTE) return;
+//    uint8_t payload_len=buf[5];
+//    if(payload_len+6!=len) return;
+//    if(crc8(&buf[1],5+payload_len)!=buf[len-1]) return;
+//
+//    char json[128];
+//    snprintf(json,sizeof(json),
+//        "{\"node\":%d,\"child\":%d,\"type\":%d,\"cmd\":%d,\"value\":",
+//        buf[1],buf[2],buf[3],buf[4]);
+//
+//    if(payload_len==1) snprintf(json+strlen(json),sizeof(json)-strlen(json),"%d}",buf[6]);
+//    else if(payload_len==2){uint16_t v=(buf[6]<<8)|buf[7]; snprintf(json+strlen(json),sizeof(json)-strlen(json),"%d}",v);}
+//    else strcat(json,"null}");
+//
+//    for(uint8_t i=0;i<strlen(json);i++) uart_send(&UDR0,json[i],&UCSR0A);
+//    uart_send(&UDR0,'\n',&UCSR0A);
+//}
+//
+//// --- Obs³uga komend z Home Assistant ---
+//void handle_ha_command(char *line){
+//    // Oczekujemy formatu JSON: {"link":1,"node":2,"child":1,"type":2,"cmd":1,"value":100}
+//    packet_t p;
+//    uint8_t link,node,child,type,cmd;
+//    uint32_t value;
+//    if(sscanf(line,"{\"link\":%hhu,\"node\":%hhu,\"child\":%hhu,\"type\":%hhu,\"cmd\":%hhu,\"value\":%lu}", &link,&node,&child,&type,&cmd,&value)==6){
+//        p.node_id=node; p.child_id=child; p.type=type; p.cmd=cmd;
+//        if(value<=0xFF){ p.length=1; p.data[0]=value;}
+//        else if(value<=0xFFFF){ p.length=2; p.data[0]=(value>>8)&0xFF; p.data[1]=value&0xFF;}
+//        else{ p.length=4; p.data[0]=(value>>24)&0xFF; p.data[1]=(value>>16)&0xFF; p.data[2]=(value>>8)&0xFF; p.data[3]=value&0xFF;}
+//        send_packet(link,&p);
+//    }
+//}
+//
+//// --- Inicjalizacja DE/RE ---
+//void init_de_re(){ DDRA|=(1<<DE1)|(1<<DE2)|(1<<DE3); rs485_rx(1); rs485_rx(2); rs485_rx(3); }
+//
+//// --- Main ---
+//int main(void){
+//    uart_init(&UBRR0H,&UBRR0L,&UCSR0B,&UCSR0C); // Serial0 HA
+//    uart_init(&UBRR1H,&UBRR1L,&UCSR1B,&UCSR1C);
+//    uart_init(&UBRR2H,&UBRR2L,&UCSR2B,&UCSR2C);
+//    uart_init(&UBRR3H,&UBRR3L,&UCSR3B,&UCSR3C);
+//
+//    init_de_re();
+//
+//    char ha_line[128]; uint8_t ha_idx=0;
+//
+//    while(1){
+//        // Odbiór z wêz³ów
+//        if(UCSR1A & (1<<RXC1)) { uint8_t b=UDR1; buffer_byte(b,1); if(idx1>5 && buf1[0]==START_BYTE) process_packet(buf1,idx1); }
+//        if(UCSR2A & (1<<RXC2)) { uint8_t b=UDR2; buffer_byte(b,2); if(idx2>5 && buf2[0]==START_BYTE) process_packet(buf2,idx2); }
+//        if(UCSR3A & (1<<RXC3)) { uint8_t b=UDR3; buffer_byte(b,3); if(idx3>5 && buf3[0]==START_BYTE) process_packet(buf3,idx3); }
+//
+//        // Odbiór z Home Assistant (Serial0)
+//        if(UCSR0A & (1<<RXC0)){
+//            char b=UDR0;
+//            if(b=='\n'){ ha_line[ha_idx]=0; handle_ha_command(ha_line); ha_idx=0;}
+//            else if(ha_idx<127){ ha_line[ha_idx++]=b;}
+//        }
+//    }
+//}
+
+
+P³ytka DFRduino Mega1280 (DFR0003) zachowuje pe³n¹ zgodnoœæ z mapowaniem pinów standardowego Arduino Mega. Poni¿ej znajduje siê przypisanie 54 cyfrowych pinów (D0–D53) do fizycznych portów mikrokontrolera ATmega1280: 
+V-Slot.pl
+V-Slot.pl
+ +1
+Piny 0 - 13 (G³ówna listwa cyfrowa)
+D0 (RX0): Port E bit 0 (PE0)
+D1 (TX0): Port E bit 1 (PE1)
+D2 (PWM): Port E bit 4 (PE4)
+D3 (PWM): Port E bit 5 (PE5)
+D4 (PWM): Port G bit 5 (PG5)
+D5 (PWM): Port E bit 3 (PE3)
+D6 (PWM): Port H bit 3 (PH3)
+D7 (PWM): Port H bit 4 (PH4)
+D8 (PWM): Port H bit 5 (PH5)
+D9 (PWM): Port H bit 6 (PH6)
+D10 (PWM): Port B bit 4 (PB4)
+D11 (PWM): Port B bit 5 (PB5)
+D12 (PWM): Port B bit 6 (PB6)
+D13 (PWM / LED): Port B bit 7 (PB7) 
+RS-online.com
+RS-online.com
+ +3
+Piny 14 - 21 (Komunikacja i przerwania)
+D14 (TX3): Port J bit 1 (PJ1)
+D15 (RX3): Port J bit 0 (PJ0)
+D16 (TX2): Port H bit 1 (PH1)
+D17 (RX2): Port H bit 0 (PH0)
+D18 (TX1): Port D bit 3 (PD3)
+D19 (RX1): Port D bit 2 (PD2)
+D20 (SDA): Port D bit 1 (PD1)
+D21 (SCL): Port D bit 0 (PD0) 
+RS-online.com
+RS-online.com
+ +2
+Piny 22 - 53 (Z³¹cze krawêdziowe/tylne)
+Piny te s¹ zorganizowane w bloki portów po 8 bitów:
+D22 – D29: Port A bity 0 – 7 (PA0–PA7)
+D30 – D37: Port C bity 7 – 0 (PC7–PC0) — Uwaga: kolejnoœæ jest odwrócona (D30 to PC7, D37 to PC0)
+D38 – D41: Port D bit 7 oraz Port G bity 2, 1, 0 (PD7, PG2, PG1, PG0)
+D42 – D49: Port L bity 7 – 0 (PL7–PL0)
+D50 – D53: Port B bity 3 – 0 (PB3–PB0) — Piny SPI: MISO, MOSI, SCK, SS 
+
+
+
+
+//
+//#define F_CPU 16000000UL    // Gateway (Mega2560) ma zazwyczaj 16MHz
+//#define BAUD_RS485 38400
+//#define MYUBRR (F_CPU/16/BAUD_RS485-1)
+//
+//#include <avr/io.h>
+//#include <util/delay.h>
+//
+//// Zak³adam, ¿e sterowanie DE/RE dla Link1 w Gatewayu jest na PC0 (z Twojego kodu rs485.c)
+//#define DE1 PC1
+//
+//void init_uarts() {
+//    // --- UART0 (USB / Monitor Szeregowy) ---
+//    UBRR0H = (uint8_t)(MYUBRR >> 8);
+//    UBRR0L = (uint8_t)MYUBRR;
+//    UCSR0B = (1 << TXEN0) | (1 << RXEN0);
+//    UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+//
+//    // --- UART1 (RS485 z ATB) ---
+//    UBRR1H = (uint8_t)(MYUBRR >> 8);
+//    UBRR1L = (uint8_t)MYUBRR;
+//    UCSR1B = (1 << TXEN1) | (1 << RXEN1);
+//    UCSR1C = (1 << UCSZ11) | (1 << UCSZ10);
+//
+//    // --- Kierunek RS485 ---
+//    DDRC |= (1 << DE1);
+//    PORTC &= ~(1 << DE1); // Stan NISKI = Odbiór
+//}
+//
+//void uart0_send(uint8_t data) {
+//    while (!(UCSR0A & (1 << UDRE0)));
+//    UDR0 = data;
+//}
+//
+//int main(void) {
+//    init_uarts();
+//
+//    // Powitanie w PuTTy
+//    const char *msg = "Gateway Ready: Listening ATB (115200)...\r\n";
+//    for (uint8_t i = 0; msg[i] != 0; i++) uart0_send(msg[i]);
+//
+//    while (1) {
+//        // Jeœli coœ przyjdzie z RS485 (UART1)
+//        if (UCSR1A & (1 << RXC1)) {
+//            uint8_t received_byte = UDR1;
+//
+//            // Przeœlij surowy bajt do PuTTy (UART0)
+//            uart0_send(received_byte);
+//        }
+//    }
+//}
+//
